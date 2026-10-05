@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width,
+               initial-scale=1,
+               maximum-scale=1,
+               user-scalable=no">
+
+<title>中国象棋</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #ead7b0;
+    color: #38291b;
+    font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Microsoft YaHei",
+        sans-serif;
+    text-align: center;
+}
+
+h1 {
+    margin: 14px 0 5px;
+    font-size: 24px;
+}
+
+.subtitle {
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.game {
+    width: min(96vw, 520px);
+    margin: auto;
+}
+
+#board {
+    width: 100%;
+    height: auto;
+    display: block;
+
+    background: #e8c98f;
+
+    border: 2px solid #6d451f;
+    border-radius: 6px;
+
+    touch-action: manipulation;
+}
+
+#message {
+    min-height: 28px;
+    margin-top: 8px;
+
+    font-size: 16px;
+    font-weight: bold;
+}
+
+button {
+    border: none;
+    border-radius: 8px;
+
+    padding: 9px 18px;
+    margin: 5px;
+
+    background: #6d451f;
+    color: white;
+
+    font-size: 15px;
+}
+
+button:active {
+    transform: scale(.96);
+}
+
+.selected {
+    filter: drop-shadow(0 0 5px #1976d2);
+}
+
+.hint {
+    font-size: 12px;
+    color: #6b5138;
+    margin-top: 4px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="game">
+
+<h1>中国象棋</h1>
+
+<div class="subtitle">
+红方先行 · 点击棋子，再点击目标位置
+</div>
+
+<svg
+    id="board"
+    viewBox="0 0 450 500"
+    xmlns="http://www.w3.org/2000/svg">
+</svg>
+
+<div id="message">
+红方走棋
+</div>
+
+<button onclick="undo()">悔棋</button>
+
+<button onclick="newGame()">新局</button>
+
+<div class="hint">
+当前为简易电脑 AI 版本
+</div>
+
+</div>
+
+
+<script>
+
+/* =========================================================
+   基础设置
+========================================================= */
+
+const board = document.getElementById("board");
+const message = document.getElementById("message");
+
+const OFFSET = 25;
+const GRID = 50;
+
+
+/* =========================================================
+   初始棋子
+========================================================= */
+
+const INITIAL = [
+
+    // 红方
+    ["车","r",0,0],
+    ["马","r",1,0],
+    ["相","r",2,0],
+    ["仕","r",3,0],
+    ["帅","r",4,0],
+    ["仕","r",5,0],
+    ["相","r",6,0],
+    ["马","r",7,0],
+    ["车","r",8,0],
+
+    ["炮","r",1,2],
+    ["炮","r",7,2],
+
+    ["兵","r",0,3],
+    ["兵","r",2,3],
+    ["兵","r",4,3],
+    ["兵","r",6,3],
+    ["兵","r",8,3],
+
+
+    // 黑方
+    ["车","b",0,9],
+    ["马","b",1,9],
+    ["象","b",2,9],
+    ["士","b",3,9],
+    ["将","b",4,9],
+    ["士","b",5,9],
+    ["象","b",6,9],
+    ["马","b",7,9],
+    ["车","b",8,9],
+
+    ["炮","b",1,7],
+    ["炮","b",7,7],
+
+    ["卒","b",0,6],
+    ["卒","b",2,6],
+    ["卒","b",4,6],
+    ["卒","b",6,6],
+    ["卒","b",8,6]
+];
+
+
+let pieces = [];
+
+let turn = "r";
+
+let selected = null;
+
+let history = [];
+
+let gameOver = false;
+
+
+/* =========================================================
+   初始化
+========================================================= */
+
+function newGame() {
+
+    pieces = INITIAL.map((p, i) => {
+
+        return {
+            id: i,
+            name: p[0],
+            color: p[1],
+            x: p[2],
+            y: p[3],
+            alive: true
+        };
+
+    });
+
+    turn = "r";
+
+    selected = null;
+
+    history = [];
+
+    gameOver = false;
+
+    drawBoard();
+
+    updateMessage();
+}
+
+
+/* =========================================================
+   工具函数
+========================================================= */
+
+function inside(x, y) {
+
+    return (
+        x >= 0 &&
+        x <= 8 &&
+        y >= 0 &&
+        y <= 9
+    );
+
+}
+
+
+function pieceAt(x, y) {
+
+    return pieces.find(p =>
+        p.alive &&
+        p.x === x &&
+        p.y === y
+    );
+
+}
+
+
+function countBetween(x1, y1, x2, y2) {
+
+    let count = 0;
+
+    const dx = Math.sign(x2 - x1);
+
+    const dy = Math.sign(y2 - y1);
+
+    let x = x1 + dx;
+
+    let y = y1 + dy;
+
+    while (x !== x2 || y !== y2) {
+
+        if (pieceAt(x, y)) {
+
+            count++;
+
+        }
+
+        x += dx;
+
+        y += dy;
+
+    }
+
+    return count;
+}
+
+
+/* =========================================================
+   判断基本走法
+========================================================= */
+
+function basicLegal(piece, x, y) {
+
+    if (!inside(x, y)) {
+        return false;
+    }
+
+    const target = pieceAt(x, y);
+
+    // 不能吃自己
+    if (target && target.color === piece.color) {
+        return false;
+    }
+
+    const dx = x - piece.x;
+
+    const dy = y - piece.y;
+
+    const ax = Math.abs(dx);
+
+    const ay = Math.abs(dy);
+
+
+    /* -------------------------
+       车
+    ------------------------- */
+
+    if (piece.name === "车") {
+
+        if (dx !== 0 && dy !== 0) {
+            return false;
+        }
+
+        return countBetween(
+            piece.x,
+            piece.y,
+            x,
+            y
+        ) === 0;
+    }
+
+
+    /* -------------------------
+       炮
+    ------------------------- */
+
+    if (piece.name === "炮") {
+
+        if (dx !== 0 && dy !== 0) {
+            return false;
+        }
+
+        const count = countBetween(
+            piece.x,
+            piece.y,
+            x,
+            y
+        );
+
+        if (target) {
+
+            return count === 1;
+
+        } else {
+
+            return count === 0;
+
+        }
+    }
+
+
+    /* -------------------------
+       马
+    ------------------------- */
+
+    if (piece.name === "马") {
+
+        if (!(
+            (ax === 1 && ay === 2) ||
+            (ax === 2 && ay === 1)
+        )) {
+
+            return false;
+
+        }
+
+        let blockX = piece.x;
+
+        let blockY = piece.y;
+
+        if (ax === 2) {
+
+            blockX += dx / 2;
+
+        } else {
+
+            blockY += dy / 2;
+
+        }
+
+        return !pieceAt(blockX, blockY);
+    }
+
+
+    /* -------------------------
+       相 / 象
+    ------------------------- */
+
+    if (
+        piece.name === "相" ||
+        piece.name === "象"
+    ) {
+
+        if (ax !== 2 || ay !== 2) {
+            return false;
+        }
+
+        // 不能过河
+        if (
+            piece.color === "r" &&
+            y > 4
+        ) {
+            return false;
+        }
+
+        if (
+            piece.color === "b" &&
+            y < 5
+        ) {
+            return false;
+        }
+
+        // 塞象眼
+        return !pieceAt(
+            piece.x + dx / 2,
+            piece.y + dy / 2
+        );
+    }
+
+
+    /* -------------------------
+       士 / 仕
+    ------------------------- */
+
+    if (
+        piece.name === "士" ||
+        piece.name === "仕"
+    ) {
+
+        if (ax !== 1 || ay !== 1) {
+            return false;
+        }
+
+        if (x < 3 || x > 5) {
+            return false;
+        }
+
+        if (piece.color === "r") {
+
+            return y >= 0 && y <= 2;
+
+        } else {
+
+            return y >= 7 && y <= 9;
+
+        }
+    }
+
+
+    /* -------------------------
+       将 / 帅
+    ------------------------- */
+
+    if (
+        piece.name === "将" ||
+        piece.name === "帅"
+    ) {
+
+        if (ax + ay !== 1) {
+            return false;
+        }
+
+        if (x < 3 || x > 5) {
+            return false;
+        }
+
+        if (piece.color === "r") {
+
+            return y >= 0 && y <= 2;
+
+        } else {
+
+            return y >= 7 && y <= 9;
+
+        }
+    }
+
+
+    /* -------------------------
+       兵 / 卒
+    ------------------------- */
+
+    if (
+        piece.name === "兵" ||
+        piece.name === "卒"
+    ) {
+
+        const forward =
+            piece.color === "r"
+                ? -1
+                : 1;
+
+
+        // 向前
+        if (
+            dx === 0 &&
+            dy === forward
+        ) {
+
+            return true;
+
+        }
+
+
+        // 过河后可以横走
+        const crossed =
+            piece.color === "r"
+                ? piece.y <= 4
+                : piece.y >= 5;
+
+
+        if (
+            crossed &&
+            dy === 0 &&
+            ax === 1
+        ) {
+
+            return true;
+
+        }
+
+        return false;
+    }
+
+
+    return false;
+}
+
+
+/* =========================================================
+   将军判断
+========================================================= */
+
+function isInCheck(color) {
+
+    const king = pieces.find(p =>
+        p.alive &&
+        p.color === color &&
+        (
+            p.name === "帅" ||
+            p.name === "将"
+        )
+    );
+
+    if (!king) {
+        return true;
+    }
+
+
+    // 判断对方棋子是否攻击老将
+    for (const p of pieces) {
+
+        if (
+            p.alive &&
+            p.color !== color
+        ) {
+
+            if (
+                basicLegal(
+                    p,
+                    king.x,
+                    king.y
+                )
+            ) {
+
+                return true;
+
+            }
+
+        }
+
+    }
+
+
+    return false;
+}
+
+
+/* =========================================================
+   最终合法走法
+========================================================= */
+
+function legalMove(piece, x, y) {
+
+    if (!basicLegal(piece, x, y)) {
+        return false;
+    }
+
+    const target = pieceAt(x, y);
+
+    const oldX = piece.x;
+
+    const oldY = piece.y;
+
+    let targetAlive = null;
+
+
+    if (target) {
+
+        targetAlive = target.alive;
+
+        target.alive = false;
+
+    }
+
+
+    piece.x = x;
+
+    piece.y = y;
+
+
+    const legal =
+        !isInCheck(piece.color);
+
+
+    piece.x = oldX;
+
+    piece.y = oldY;
+
+
+    if (target) {
+
+        target.alive = targetAlive;
+
+    }
+
+
+    return legal;
+}
+
+
+/* =========================================================
+   是否还有可走棋
+========================================================= */
+
+function hasLegalMove(color) {
+
+    for (const p of pieces) {
+
+        if (
+            !p.alive ||
+            p.color !== color
+        ) {
+
+            continue;
+
+        }
+
+
+        for (let y = 0; y < 10; y++) {
+
+            for (let x = 0; x < 9; x++) {
+
+                if (
+                    legalMove(
+                        p,
+                        x,
+                        y
+                    )
+                ) {
+
+                    return true;
+
+                }
+
+            }
+
+        }
+
+    }
+
+    return false;
+}
+
+
+/* =========================================================
+   保存局面
+========================================================= */
+
+function saveHistory() {
+
+    history.push(
+        JSON.stringify(pieces)
+    );
+
+    if (history.length > 50) {
+
+        history.shift();
+
+    }
+}
+
+
+/* =========================================================
+   执行走棋
+========================================================= */
+
+function makeMove(piece, x, y) {
+
+    saveHistory();
+
+    const target = pieceAt(x, y);
+
+    if (target) {
+
+        target.alive = false;
+
+    }
+
+    piece.x = x;
+
+    piece.y = y;
+
+    turn =
+        turn === "r"
+            ? "b"
+            : "r";
+
+    selected = null;
+
+    drawBoard();
+
+
+    // 判断胜负
+    if (!hasLegalMove(turn)) {
+
+        gameOver = true;
+
+        if (isInCheck(turn)) {
+
+            message.textContent =
+                turn === "r"
+                    ? "红方被将死，黑方胜！"
+                    : "黑方被将死，红方胜！";
+
+        } else {
+
+            message.textContent =
+                "无棋可走，和棋！";
+
+        }
+
+        return;
+    }
+
+
+    updateMessage();
+
+
+    // 黑方 AI
+    if (
+        turn === "b" &&
+        !gameOver
+    ) {
+
+        setTimeout(
+            computerMove,
+            300
+        );
+
+    }
+}
+
+
+/* =========================================================
+   悔棋
+========================================================= */
+
+function undo() {
+
+    if (
+        history.length === 0 ||
+        gameOver
+    ) {
+
+        return;
+
+    }
+
+    pieces =
+        JSON.parse(
+            history.pop()
+        );
+
+    turn = "r";
+
+    selected = null;
+
+    drawBoard();
+
+    updateMessage();
+}
+
+
+/* =========================================================
+   AI
+========================================================= */
+
+function computerMove() {
+
+    if (
+        turn !== "b" ||
+        gameOver
+    ) {
+
+        return;
+
+    }
+
+    const moves = [];
+
+
+    for (const p of pieces) {
+
+        if (
+            !p.alive ||
+            p.color !== "b"
+        ) {
+
+            continue;
+
+        }
+
+
+        for (let y = 0; y < 10; y++) {
+
+            for (let x = 0; x < 9; x++) {
+
+                if (
+                    legalMove(
+                        p,
+                        x,
+                        y
+                    )
+                ) {
+
+                    const target =
+                        pieceAt(x, y);
+
+                    let score = 0;
+
+                    if (target) {
+
+                        const values = {
+
+                            "帅": 1000,
+                            "将": 1000,
+
+                            "车": 90,
+
+                            "炮": 50,
+
+                            "马": 40,
+
+                            "相": 20,
+                            "象": 20,
+
+                            "仕": 20,
+                            "士": 20,
+
+                            "兵": 10,
+                            "卒": 10
+
+                        };
+
+                        score =
+                            values[target.name] || 0;
+
+                    }
+
+
+                    moves.push({
+                        piece: p,
+                        x: x,
+                        y: y,
+                        score: score
+                    });
+
+                }
+
+            }
+
+        }
+
+    }
+
+
+    if (moves.length === 0) {
+
+        gameOver = true;
+
+        message.textContent =
+            "红方胜利！";
+
+        return;
+
+    }
+
+
+    // 优先吃子
+    moves.sort(
+        (a, b) =>
+            b.score - a.score
+    );
+
+
+    const bestScore =
+        moves[0].score;
+
+
+    const candidates =
+        moves.filter(
+            m =>
+                m.score === bestScore
+        );
+
+
+    const move =
+        candidates[
+            Math.floor(
+                Math.random() *
+                candidates.length
+            )
+        ];
+
+
+    makeMove(
+        move.piece,
+        move.x,
+        move.y
+    );
+}
+
+
+/* =========================================================
+   状态文字
+========================================================= */
+
+function updateMessage() {
+
+    if (gameOver) {
+        return;
+    }
+
+    const side =
+        turn === "r"
+            ? "红方"
+            : "黑方";
+
+    let text =
+        side + "走棋";
+
+    if (isInCheck(turn)) {
+
+        text += " · 将军！";
+
+    }
+
+    message.textContent = text;
+}
+
+
+/* =========================================================
+   点击棋子
+========================================================= */
+
+function selectPiece(id) {
+
+    if (
+        gameOver ||
+        turn !== "r"
+    ) {
+
+        return;
+
+    }
+
+    const piece =
+        pieces.find(
+            p => p.id === id
+        );
+
+    if (
+        !piece ||
+        !piece.alive
+    ) {
+
+        return;
+
+    }
+
+
+    // 尚未选择
+    if (selected === null) {
+
+        if (piece.color === "r") {
+
+            selected = id;
+
+            drawBoard();
+
+        }
+
+        return;
+    }
+
+
+    const current =
+        pieces.find(
+            p =>
+                p.id === selected
+        );
+
+
+    // 点击另一个红棋子
+    if (
+        piece.color === "r"
+    ) {
+
+        selected =
+            piece.id;
+
+        drawBoard();
+
+        return;
+    }
+
+
+    // 点击黑棋子
+    if (
+        current &&
+        legalMove(
+            current,
+            piece.x,
+            piece.y
+        )
+    ) {
+
+        makeMove(
+            current,
+            piece.x,
+            piece.y
+        );
+
+    }
+}
+
+
+/* =========================================================
+   点击棋盘空位
+========================================================= */
+
+board.addEventListener(
+    "click",
+    function(event) {
+
+        if (
+            selected === null ||
+            turn !== "r" ||
+            gameOver
+        ) {
+
+            return;
+
+        }
+
+
+        // 如果点到了棋子，
+        // 由 selectPiece 处理
+        if (
+            event.target.closest(
+                ".piece"
+            )
+        ) {
+
+            return;
+
+        }
+
+
+        const rect =
+            board.getBoundingClientRect();
+
+
+        const svgX =
+            (event.clientX -
+                rect.left)
+            *
+            450 /
+            rect.width;
+
+
+        const svgY =
+            (event.clientY -
+                rect.top)
+            *
+            500 /
+            rect.height;
+
+
+        const x =
+            Math.round(
+                (svgX - OFFSET) /
+                GRID
+            );
+
+
+        const y =
+            Math.round(
+                (svgY - OFFSET) /
+                GRID
+            );
+
+
+        if (!inside(x, y)) {
+
+            return;
+
+        }
+
+
+        const piece =
+            pieces.find(
+                p =>
+                    p.id === selected
+            );
+
+
+        if (
+            piece &&
+            legalMove(
+                piece,
+                x,
+                y
+            )
+        ) {
+
+            makeMove(
+                piece,
+                x,
+                y
+            );
+
+        }
+
+    }
+);
+
+
+/* =========================================================
+   绘制棋盘
+========================================================= */
+
+function drawBoard() {
+
+    let html = "";
+
+
+    // 背景
+    html += `
+        <rect
+            x="0"
+            y="0"
+            width="450"
+            height="500"
+            fill="#e8c98f"
+        />
+    `;
+
+
+    // 横线
+    for (
+        let y = 0;
+        y < 10;
+        y++
+    ) {
+
+        html += `
+            <line
+                x1="${OFFSET}"
+                y1="${OFFSET + y * GRID}"
+                x2="${OFFSET + 8 * GRID}"
+                y2="${OFFSET + y * GRID}"
+                stroke="#4d3018"
+                stroke-width="1"
+            />
+        `;
+
+    }
+
+
+    // 竖线
+    for (
+        let x = 0;
+        x < 9;
+        x++
+    ) {
+
+        const X =
+            OFFSET + x * GRID;
+
+
+        if (
+            x === 0 ||
+            x === 8
+        ) {
+
+            html += `
+                <line
+                    x1="${X}"
+                    y1="25"
+                    x2="${X}"
+                    y2="475"
+                    stroke="#4d3018"
+                />
+            `;
+
+        } else {
+
+            html += `
+                <line
+                    x1="${X}"
+                    y1="25"
+                    x2="${X}"
+                    y2="225"
+                    stroke="#4d3018"
+                />
+
+                <line
+                    x1="${X}"
+                    y1="275"
+                    x2="${X}"
+                    y2="475"
+                    stroke="#4d3018"
+                />
+            `;
+
+        }
+
+    }
+
+
+    // 楚河汉界
+    html += `
+        <text
+            x="225"
+            y="254"
+            text-anchor="middle"
+            font-size="27"
+            fill="#7b542e"
+        >
+            楚河　漢界
+        </text>
+    `;
+
+
+    // 红方九宫
+    html += `
+        <line
+            x1="175"
+            y1="25"
+            x2="275"
+            y2="125"
+            stroke="#4d3018"
+        />
+
+        <line
+            x1="275"
+            y1="25"
+            x2="175"
+            y2="125"
+            stroke="#4d3018"
+        />
+    `;
+
+
+    // 黑方九宫
+    html += `
+        <line
+            x1="175"
+            y1="475"
+            x2="275"
+            y2="375"
+            stroke="#4d3018"
+        />
+
+        <line
+            x1="275"
+            y1="475"
+            x2="175"
+            y2="375"
+            stroke="#4d3018"
+        />
+    `;
+
+
+    // 棋子
+    for (const p of pieces) {
+
+        if (!p.alive) {
+            continue;
+        }
+
+
+        const cx =
+            OFFSET +
+            p.x * GRID;
+
+        const cy =
+            OFFSET +
+            p.y * GRID;
+
+
+        const selectedClass =
+            selected === p.id
+                ? "selected"
+                : "";
+
+
+        const textColor =
+            p.color === "r"
+                ? "#b3261e"
+                : "#171717";
+
+
+        html += `
+            <g
+                class="piece ${selectedClass}"
+                data-id="${p.id}"
+                onclick="selectPiece(${p.id})"
+            >
+
+                <circle
+                    cx="${cx}"
+                    cy="${cy}"
+                    r="20"
+                    fill="#f4e7cc"
+                    stroke="#5b351c"
+                    stroke-width="2"
+                />
+
+                <circle
+                    cx="${cx}"
+                    cy="${cy}"
+                    r="17"
+                    fill="none"
+                    stroke="#b89970"
+                    stroke-width="1"
+                />
+
+                <text
+                    x="${cx}"
+                    y="${cy + 8}"
+                    text-anchor="middle"
+                    font-size="25"
+                    font-weight="bold"
+                    fill="${textColor}"
+                >
+                    ${p.name}
+                </text>
+
+            </g>
+        `;
+
+    }
+
+
+    board.innerHTML = html;
+}
+
+
+/* =========================================================
+   启动游戏
+========================================================= */
+
+newGame();
+
+</script>
+
+</body>
+</html>
